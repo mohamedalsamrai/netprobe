@@ -42,12 +42,14 @@ impl Identity {
         Ok(id)
     }
 
+    /// The saved identity, if it exists and is readable by this user.
+    pub fn load(dir: &Path) -> Option<Self> {
+        std::fs::read_to_string(dir.join(FILE)).ok().and_then(|t| serde_json::from_str(&t).ok())
+    }
+
     /// The saved identity if readable, otherwise a throwaway one (for `netprobe once`).
     pub fn load_or_ephemeral(dir: &Path) -> Self {
-        std::fs::read_to_string(dir.join(FILE))
-            .ok()
-            .and_then(|t| serde_json::from_str(&t).ok())
-            .unwrap_or_else(Self::generate)
+        Self::load(dir).unwrap_or_else(Self::generate)
     }
 
     /// `h:` + a salted hash of the gateway's MAC (or its IP and interface when the MAC

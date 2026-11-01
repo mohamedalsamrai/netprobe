@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.netprobe.agent</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/netprobe</string>
+    <string>run</string>
+    <string>--data-dir</string>
+    <string>/Library/Application Support/netprobe</string>
+  </array>
+  <key>UserName</key>
+  <string>_netprobe</string>
+  <key>GroupName</key>
+  <string>_netprobe</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>Umask</key>
+  <integer>18</integer>
+  <key>StandardOutPath</key>
+  <string>/Library/Logs/netprobe/netprobe.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Library/Logs/netprobe/netprobe.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>NETPROBE_LOG</key>
+    <string>info</string>
+  </dict>
+</dict>
+</plist>
