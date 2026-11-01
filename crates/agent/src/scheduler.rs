@@ -63,7 +63,7 @@ pub async fn run(agent: Arc<Agent>, store: SharedStore, mut shutdown: watch::Rec
     set.spawn(maintenance_loop(agent.clone(), store.clone(), shutdown.clone()));
     set.spawn(network_watch(agent.clone(), shutdown.clone()));
 
-    let _ = shutdown.wait_for(|s| *s).await;
+    stopped(&mut shutdown).await;
     // let in-flight probes finish their writes, but don't hold up launchd for long
     let _ = tokio::time::timeout(Duration::from_secs(5), set.join_all()).await;
 }
@@ -99,18 +99,24 @@ where
     ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
     loop {
         tokio::select! {
-            _ = ticker.tick() => f().await,
-            _ = shutdown.wait_for(|s| *s) => return,
+            _ = ticker.tick() => {}
+            _ = stopped(&mut shutdown) => return,
         }
+        f().await;
     }
 }
 
 /// Returns true if shutdown was requested while sleeping.
 async fn sleep_or_shutdown(d: Duration, shutdown: &mut watch::Receiver<bool>) -> bool {
     tokio::select! {
-        _ = tokio::time::sleep(d) => *shutdown.borrow(),
-        _ = shutdown.wait_for(|s| *s) => true,
+        _ = tokio::time::sleep(d) => false,
+        _ = stopped(shutdown) => true,
     }
+}
+
+/// Resolves once shutdown has been requested.
+async fn stopped(shutdown: &mut watch::Receiver<bool>) {
+    let _ = shutdown.wait_for(|s| *s).await;
 }
 
 fn save(store: &SharedStore, records: &[Record]) {
@@ -162,7 +168,7 @@ async fn throughput_loop(agent: Arc<Agent>, store: SharedStore, mut shutdown: wa
         tracing::info!("next speed test in {}", report::human_duration(next.saturating_duration_since(Instant::now())));
         tokio::select! {
             _ = tokio::time::sleep_until(next) => {}
-            _ = shutdown.wait_for(|s| *s) => return,
+            _ = stopped(&mut shutdown) => return,
         }
         match gate(&agent, &store, &mut postponed).await {
             Gate::Run { cap } => {

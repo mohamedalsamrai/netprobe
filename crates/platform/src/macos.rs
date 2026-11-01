@@ -154,7 +154,7 @@ impl Platform for MacOs {
             if source.is_null() {
                 return false;
             }
-            CFString::wrap_under_get_rule(source).to_string() == "Battery Power"
+            CFString::wrap_under_get_rule(source) == "Battery Power"
         }
     }
 
@@ -225,7 +225,7 @@ fn dict_strings(dict: &CFDictionary<CFString, CFType>, key: &str) -> Vec<String>
 
 fn link_type(bsd_name: &str) -> LinkType {
     for iface in get_interfaces().iter() {
-        if iface.bsd_name().is_some_and(|n| n.to_string() == bsd_name) {
+        if iface.bsd_name().is_some_and(|n| n == bsd_name) {
             return match iface.interface_type() {
                 Some(SCNetworkInterfaceType::IEEE80211) => LinkType::Wifi,
                 Some(SCNetworkInterfaceType::Ethernet) => LinkType::Ethernet,

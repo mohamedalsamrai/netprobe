@@ -263,7 +263,7 @@ fn cmd_status(json: bool, data_dir: Option<PathBuf>) -> anyhow::Result<()> {
         ),
         None => (Vec::new(), None, 0),
     };
-    let (latency, dns, connection, speed, tcp) = report::build_status(&records, last_speed.as_ref());
+    let sections = report::build_status(&records, last_speed.as_ref());
     let status = report::Status {
         version: env!("CARGO_PKG_VERSION"),
         service: service::state(),
@@ -277,13 +277,13 @@ fn cmd_status(json: bool, data_dir: Option<PathBuf>) -> anyhow::Result<()> {
             metered: platform.is_metered(),
             on_battery: platform.on_battery(),
         }),
-        latency,
-        dns,
-        connection,
-        speed,
+        latency: sections.latency,
+        dns: sections.dns,
+        connection: sections.connection,
+        speed: sections.speed,
         speed_data_24h_mb: used as f64 / MB as f64,
         daily_cap_mb: cfg.throughput.daily_cap_mb,
-        tcp_retrans_1h_pct: tcp,
+        tcp_retrans_1h_pct: sections.tcp_retrans_1h_pct,
     };
     if json {
         println!("{}", serde_json::to_string_pretty(&status)?);

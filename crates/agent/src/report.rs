@@ -309,8 +309,16 @@ fn within(r: &Record, d: Duration) -> bool {
 const HOUR: Duration = Duration::from_secs(3600);
 const DAY: Duration = Duration::from_secs(86400);
 
+pub struct Sections {
+    pub latency: Vec<LatencyRow>,
+    pub dns: Vec<DnsRow>,
+    pub connection: Vec<ConnRow>,
+    pub speed: Option<SpeedRow>,
+    pub tcp_retrans_1h_pct: Option<f64>,
+}
+
 /// Builds the status sections from the last 24 hours of records (newest first).
-pub fn build_status(records: &[Record], last_speed: Option<&Record>) -> (Vec<LatencyRow>, Vec<DnsRow>, Vec<ConnRow>, Option<SpeedRow>, Option<f64>) {
+pub fn build_status(records: &[Record], last_speed: Option<&Record>) -> Sections {
     let latency = by_target(records, "latency")
         .into_iter()
         .filter_map(|(target, rs)| {
@@ -409,8 +417,8 @@ pub fn build_status(records: &[Record], last_speed: Option<&Record>) -> (Vec<Lat
             ProbeData::TcpSystem(d) => (s + d.sent_segments, x + d.retrans_segments),
             _ => (s, x),
         });
-    let tcp = netprobe_core::stats::ratio_pct(retrans as f64, sent as f64).map(round2);
-    (latency, dns, connection, speed, tcp)
+    let tcp_retrans_1h_pct = netprobe_core::stats::ratio_pct(retrans as f64, sent as f64).map(round2);
+    Sections { latency, dns, connection, speed, tcp_retrans_1h_pct }
 }
 
 pub fn print_status(s: &Status) {
