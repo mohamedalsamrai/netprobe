@@ -33,8 +33,9 @@ pub async fn probe_resolver(resolver: IpAddr, p: &DnsParams) -> DnsData {
 /// Times getaddrinfo, which is what applications experience (OS cache included).
 pub async fn probe_system(name: &str, timeout: Duration) -> DnsData {
     let start = Instant::now();
-    let (outcome, ms) = match tokio::time::timeout(timeout, tokio::net::lookup_host((name, 443))).await {
-        Ok(Ok(mut addrs)) if addrs.next().is_some() => (DnsOutcome::Ok, Some(elapsed_ms(start))),
+    let result = tokio::time::timeout(timeout, tokio::net::lookup_host((name, 443))).await;
+    let (outcome, ms) = match result.map(|r| r.map(|mut addrs| addrs.next().is_some())) {
+        Ok(Ok(true)) => (DnsOutcome::Ok, Some(elapsed_ms(start))),
         Ok(_) => (DnsOutcome::Error, Some(elapsed_ms(start))),
         Err(_) => (DnsOutcome::Timeout, None),
     };
