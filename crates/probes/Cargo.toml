@@ -1,0 +1,25 @@
+[package]
+name = "netprobe-probes"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+netprobe-core.workspace = true
+netprobe-platform.workspace = true
+anyhow.workspace = true
+bytes.workspace = true
+hickory-proto.workspace = true
+http.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
+libc.workspace = true
+rand.workspace = true
+rustls.workspace = true
+socket2.workspace = true
+tokio.workspace = true
+tokio-rustls.workspace = true
+tracing.workspace = true
+webpki-roots.workspace = true

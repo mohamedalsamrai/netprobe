@@ -1,0 +1,57 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/core",
+    "crates/probes",
+    "crates/platform",
+    "crates/storage",
+    "crates/agent",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+[workspace.dependencies]
+netprobe-core = { path = "crates/core" }
+netprobe-probes = { path = "crates/probes" }
+netprobe-platform = { path = "crates/platform" }
+netprobe-storage = { path = "crates/storage" }
+
+anyhow = "1"
+block2 = "0.6"
+bytes = "1"
+clap = { version = "4.6", features = ["derive"] }
+core-foundation = "0.10"
+hickory-proto = { version = "0.26", default-features = false, features = ["std"] }
+http = "1"
+http-body-util = "0.1"
+hyper = { version = "1.12", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+libc = "0.2"
+rand = "0.9"
+rusqlite = { version = "0.41", features = ["bundled"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+socket2 = { version = "0.6", features = ["all"] }
+system-configuration = "0.8"
+time = { version = "0.3", features = ["serde", "formatting", "parsing", "macros", "local-offset"] }
+tokio = { version = "1.54", features = ["rt", "rt-multi-thread", "net", "time", "macros", "sync", "signal", "io-util"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+toml = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+ulid = "1"
+uuid = { version = "1", features = ["v4"] }
+webpki-roots = "1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

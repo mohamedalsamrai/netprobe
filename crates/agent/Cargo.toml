@@ -1,0 +1,31 @@
+[package]
+name = "netprobe"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+description = "netprobe network quality agent"
+
+[[bin]]
+name = "netprobe"
+path = "src/main.rs"
+
+[dependencies]
+netprobe-core.workspace = true
+netprobe-platform.workspace = true
+netprobe-probes.workspace = true
+netprobe-storage.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+libc.workspace = true
+rand.workspace = true
+rustls.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+time.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+ulid.workspace = true
+uuid.workspace = true
