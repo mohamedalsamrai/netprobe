@@ -165,7 +165,9 @@ async fn throughput_loop(agent: Arc<Agent>, store: SharedStore, mut shutdown: wa
     let mut postponed = 0;
     let mut last_reason = String::new();
     loop {
-        tracing::info!("next speed test in {}", report::human_duration(next.saturating_duration_since(Instant::now())));
+        if last_reason.is_empty() {
+            tracing::info!("next speed test in {}", report::human_duration(next.saturating_duration_since(Instant::now())));
+        }
         tokio::select! {
             _ = tokio::time::sleep_until(next) => {}
             _ = stopped(&mut shutdown) => return,
@@ -182,9 +184,12 @@ async fn throughput_loop(agent: Arc<Agent>, store: SharedStore, mut shutdown: wa
             }
             Gate::Retry { reason, after } => {
                 // log each new reason once; repeats every half hour would only be noise
+                let retry_in = report::human_duration(after);
                 if reason != last_reason {
-                    tracing::info!(%reason, "speed test postponed");
+                    tracing::info!(%reason, "speed test postponed, retrying every {retry_in}");
                     last_reason = reason;
+                } else {
+                    tracing::debug!(%reason, "speed test still postponed");
                 }
                 next = Instant::now() + after;
             }

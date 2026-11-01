@@ -63,6 +63,9 @@ pub fn summary_line(r: &Record) -> String {
             d.sent
         ),
         ProbeData::Dns(_) if r.has_flag(flag::OUTAGE) => "line down (outage)".into(),
+        ProbeData::Dns(d) if r.target.as_deref() == Some("system") => {
+            format!("getaddrinfo {} ms  failed {}/{}", ms(d.cached_ms), d.failed, d.total)
+        }
         ProbeData::Dns(d) => format!(
             "cached {} ms  uncached {} ms  failed {}/{}",
             ms(d.cached_ms),
@@ -135,13 +138,17 @@ pub fn print_records(records: &[Record]) {
                     println!("  {target:<26} skipped: line is down");
                     continue;
                 }
-                println!(
-                    "  {target:<26} cached {} ms · uncached {} ms · failed {}/{}{flags}",
-                    ms(d.cached_ms),
-                    ms(d.uncached_ms),
-                    d.failed,
-                    d.total
-                );
+                if target == "system" {
+                    println!("  {target:<26} getaddrinfo {} ms · failed {}/{}{flags}", ms(d.cached_ms), d.failed, d.total);
+                } else {
+                    println!(
+                        "  {target:<26} cached {} ms · uncached {} ms · failed {}/{}{flags}",
+                        ms(d.cached_ms),
+                        ms(d.uncached_ms),
+                        d.failed,
+                        d.total
+                    );
+                }
                 let detail: Vec<String> = d
                     .queries
                     .iter()
@@ -299,6 +306,8 @@ fn by_target<'a>(records: &'a [Record], probe: &str) -> Vec<(String, Vec<&'a Rec
         }
         groups.entry(t).or_default().push(r);
     }
+    // the gateway first and the OS resolver last; everything else by name
+    order.sort_by_key(|t| (if t == "gateway" { 0 } else if t == "system" { 2 } else { 1 }, t.clone()));
     order.into_iter().map(|t| (t.clone(), groups.remove(&t).unwrap_or_default())).collect()
 }
 
