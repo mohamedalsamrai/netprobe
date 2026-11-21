@@ -97,6 +97,11 @@ pub fn summary_line(r: &Record) -> String {
             ),
         },
         ProbeData::TcpSystem(d) => format!("retrans {} of {} segments", pct(d.retrans_pct), d.sent_segments),
+        ProbeData::Heartbeat(d) => format!(
+            "alive · agent up {} · internet {}",
+            human_duration(Duration::from_secs(d.agent_uptime_s)),
+            if d.internet { "ok" } else { "down" }
+        ),
     };
     let flags = if r.flags.is_empty() { String::new() } else { format!("  [{}]", r.flags.join(", ")) };
     format!("{:<10} {:<24} {body}{flags}", r.probe(), r.target.as_deref().unwrap_or("-"))
@@ -191,6 +196,7 @@ pub fn print_records(records: &[Record]) {
             ProbeData::TcpSystem(d) => {
                 println!("  retransmissions {} of {} segments in {:.0} s", pct(d.retrans_pct), d.sent_segments, d.interval_s)
             }
+            ProbeData::Heartbeat(_) => println!("  {}", summary_line(r)),
         }
     }
 }
@@ -239,6 +245,16 @@ pub struct Status {
     pub speed_data_24h_mb: f64,
     pub daily_cap_mb: u64,
     pub tcp_retrans_1h_pct: Option<f64>,
+    pub heartbeat: Option<HeartbeatRow>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct HeartbeatRow {
+    pub age_s: u64,
+    pub internet: bool,
+    /// Heartbeats in the last 24 hours, and how many a full day would have.
+    pub count_24h: u32,
+    pub expected_24h: u32,
 }
 
 #[derive(Debug, Serialize)]
@@ -324,6 +340,7 @@ pub struct Sections {
     pub connection: Vec<ConnRow>,
     pub speed: Option<SpeedRow>,
     pub tcp_retrans_1h_pct: Option<f64>,
+    pub heartbeat: Option<HeartbeatRow>,
 }
 
 /// Builds the status sections from the last 24 hours of records (newest first).
@@ -427,7 +444,17 @@ pub fn build_status(records: &[Record], last_speed: Option<&Record>) -> Sections
             _ => (s, x),
         });
     let tcp_retrans_1h_pct = netprobe_core::stats::ratio_pct(retrans as f64, sent as f64).map(round2);
-    Sections { latency, dns, connection, speed, tcp_retrans_1h_pct }
+    let beats: Vec<&Record> = records.iter().filter(|r| r.probe() == "heartbeat").collect();
+    let heartbeat = beats.first().and_then(|r| match &r.data {
+        ProbeData::Heartbeat(d) => Some(HeartbeatRow {
+            age_s: age(r.ts).as_secs(),
+            internet: d.internet,
+            count_24h: beats.len() as u32,
+            expected_24h: (DAY.as_secs() / d.interval_s.max(1)) as u32,
+        }),
+        _ => None,
+    });
+    Sections { latency, dns, connection, speed, tcp_retrans_1h_pct, heartbeat }
 }
 
 pub fn print_status(s: &Status) {
@@ -524,5 +551,14 @@ pub fn print_status(s: &Status) {
     println!("  data used by speed tests (24h): {:.0} / {} MB", s.speed_data_24h_mb, s.daily_cap_mb);
     if let Some(t) = s.tcp_retrans_1h_pct {
         println!("\nTCP retransmissions, whole system (1h): {t:.2}%");
+    }
+    if let Some(h) = &s.heartbeat {
+        println!(
+            "\nHEARTBEAT  last {} ago · internet {} · {} / {} in 24h",
+            human_duration(Duration::from_secs(h.age_s)),
+            if h.internet { "ok" } else { "down" },
+            h.count_24h,
+            h.expected_24h
+        );
     }
 }

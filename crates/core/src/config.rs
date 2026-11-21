@@ -14,6 +14,7 @@ pub struct Config {
     pub connection: ConnectionConfig,
     pub throughput: ThroughputConfig,
     pub storage: StorageConfig,
+    pub heartbeat: HeartbeatConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -156,6 +157,18 @@ impl Default for StorageConfig {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct HeartbeatConfig {
+    pub interval_secs: u64,
+}
+
+impl Default for HeartbeatConfig {
+    fn default() -> Self {
+        Self { interval_secs: 300 }
+    }
+}
+
 impl Config {
     /// Loads `path`, or returns the defaults when the file does not exist.
     pub fn load(path: &Path) -> anyhow::Result<Self> {
@@ -226,6 +239,9 @@ latency_target = "1.1.1.1"
 [storage]
 raw_retention_days = 7
 hourly_retention_days = 90
+
+[heartbeat]
+interval_secs = 300     # "agent alive" record, written even while the internet is down
 "#;
 
 #[cfg(test)]

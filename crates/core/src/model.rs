@@ -56,6 +56,7 @@ pub enum ProbeData {
     Connection(ConnectionData),
     Throughput(ThroughputData),
     TcpSystem(TcpSystemData),
+    Heartbeat(HeartbeatData),
 }
 
 impl ProbeData {
@@ -66,6 +67,7 @@ impl ProbeData {
             ProbeData::Connection(_) => "connection",
             ProbeData::Throughput(_) => "throughput",
             ProbeData::TcpSystem(_) => "tcp_system",
+            ProbeData::Heartbeat(_) => "heartbeat",
         }
     }
 }
@@ -266,6 +268,24 @@ pub struct TcpSystemData {
     pub retrans_pct: Option<f64>,
 }
 
+// ---- Heartbeat ----
+
+/// "The agent is alive": written on a fixed schedule whether or not the internet works,
+/// so a gap in measurements can be told apart from the agent being off.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeartbeatData {
+    /// The scheduled spacing between heartbeats.
+    pub interval_s: u64,
+    /// Seconds since the agent process started.
+    pub agent_uptime_s: u64,
+    /// Seconds since the machine booted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_uptime_s: Option<u64>,
+    /// Whether 1.1.1.1 or 8.8.8.8 answered a TCP handshake at that moment.
+    pub internet: bool,
+    pub version: String,
+}
+
 impl Record {
     pub fn probe(&self) -> &'static str {
         self.data.kind()
@@ -316,6 +336,7 @@ impl Record {
                 }
             }
             ProbeData::TcpSystem(d) => push("retrans_pct", d.retrans_pct),
+            ProbeData::Heartbeat(d) => push("internet_pct", Some(if d.internet { 100.0 } else { 0.0 })),
         }
         out
     }

@@ -58,6 +58,10 @@ The service runs as a dedicated hidden account (`_netprobe`), not as root. After
 - **Download retransmissions** come from the `server-timing: cfL4` header, where Cloudflare reports its server-side TCP counters.
 - **The system-wide retransmission rate** is not available: macOS 26 hides those counters from processes that are not root, and the service runs as `_netprobe`.
 
+## Heartbeat
+
+Every 5 minutes (`[heartbeat] interval_secs`) the agent stores a `heartbeat` record: agent uptime, system uptime and whether the internet answered at that moment. Heartbeats start right away, even while the network is down. A gap with no heartbeats means the agent was off. Heartbeats with `internet: false` mean the agent was running but the line was down. `netprobe status` shows the last heartbeat and how many were written in 24 hours, and `netprobe history --probe heartbeat` lists them.
+
 ## Speed test rules
 
 - Postponed on metered connections (Personal Hotspot, cellular, Low Data Mode) and on battery power, with a retry every 30 minutes.

@@ -108,6 +108,7 @@ enum Probe {
     Connection,
     Throughput,
     TcpSystem,
+    Heartbeat,
 }
 
 impl Probe {
@@ -118,6 +119,7 @@ impl Probe {
             Probe::Connection => "connection",
             Probe::Throughput => "throughput",
             Probe::TcpSystem => "tcp_system",
+            Probe::Heartbeat => "heartbeat",
         }
     }
 }
@@ -216,6 +218,7 @@ fn cmd_once(probes: Vec<Probe>, quick: bool, cap_mb: Option<u64>, json: bool, co
                     records.push(agent.run_throughput(cap).await);
                 }
                 Probe::TcpSystem => {}
+                Probe::Heartbeat => records.push(agent.heartbeat_record(started, Duration::ZERO).await),
             }
         }
         if probes.contains(&Probe::TcpSystem) {
@@ -284,6 +287,7 @@ fn cmd_status(json: bool, data_dir: Option<PathBuf>) -> anyhow::Result<()> {
         speed_data_24h_mb: used as f64 / MB as f64,
         daily_cap_mb: cfg.throughput.daily_cap_mb,
         tcp_retrans_1h_pct: sections.tcp_retrans_1h_pct,
+        heartbeat: sections.heartbeat,
     };
     if json {
         println!("{}", serde_json::to_string_pretty(&status)?);

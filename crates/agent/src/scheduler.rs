@@ -32,12 +32,15 @@ const BUSY_FALLBACK_MBPS: f64 = 1.0;
 const MIN_TEST_BUDGET: u64 = 20 * MB;
 
 pub async fn run(agent: Arc<Agent>, store: SharedStore, mut shutdown: watch::Receiver<bool>) {
+    // started before waiting for the network: heartbeats must keep coming while it is down
+    let mut set = JoinSet::new();
+    set.spawn(heartbeat_loop(agent.clone(), store.clone(), shutdown.clone()));
     if !wait_for_network(&agent, &mut shutdown).await {
+        let _ = tokio::time::timeout(Duration::from_secs(5), set.join_all()).await;
         return;
     }
     tracing::info!("network is up, starting probes");
 
-    let mut set = JoinSet::new();
     let c = &agent.cfg;
     let light = [
         ("latency", c.latency.interval_secs),
@@ -249,6 +252,23 @@ async fn background_mbps(agent: &Agent, ifname: &str) -> Option<(f64, f64)> {
     let (rx1, tx1) = agent.platform.interface_bytes(ifname)?;
     let rate = |a: u64, b: u64| b.saturating_sub(a) as f64 * 8.0 / BUSY_SAMPLE.as_secs_f64() / 1e6;
     Some((rate(rx0, rx1), rate(tx0, tx1)))
+}
+
+/// Writes an "agent alive" record on a fixed schedule, the first one right away.
+async fn heartbeat_loop(agent: Arc<Agent>, store: SharedStore, mut shutdown: watch::Receiver<bool>) {
+    let started = std::time::Instant::now();
+    let period = Duration::from_secs(agent.cfg.heartbeat.interval_secs.max(10));
+    let mut ticker = tokio::time::interval(period);
+    // after sleep or a stall, carry on from now instead of firing a burst of catch-up beats
+    ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            _ = ticker.tick() => {}
+            _ = stopped(&mut shutdown) => return,
+        }
+        let rec = agent.heartbeat_record(started, period).await;
+        save(&store, &[rec]);
+    }
 }
 
 async fn tcp_system_loop(agent: Arc<Agent>, store: SharedStore, mut shutdown: watch::Receiver<bool>) {

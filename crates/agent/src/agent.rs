@@ -4,7 +4,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
 
-use netprobe_core::model::{IfaceInfo, ProbeData, TcpSystemData, flag};
+use netprobe_core::model::{HeartbeatData, IfaceInfo, ProbeData, TcpSystemData, flag};
 use netprobe_core::stats::{counter_delta, ratio_pct, round2};
 use netprobe_core::{Config, Record};
 use netprobe_platform::{NetworkContext, Platform, TcpCounters};
@@ -221,6 +221,18 @@ impl Agent {
             retrans_pct: ratio_pct(retrans as f64, sent as f64).map(round2),
         };
         self.record(&self.snapshot(), Some("system".into()), ProbeData::TcpSystem(data), vec![])
+    }
+
+    /// "Alive" record; `started` is when the agent process began.
+    pub async fn heartbeat_record(&self, started: std::time::Instant, interval: Duration) -> Record {
+        let data = HeartbeatData {
+            interval_s: interval.as_secs(),
+            agent_uptime_s: started.elapsed().as_secs(),
+            system_uptime_s: self.platform.uptime().map(|u| u.as_secs()),
+            internet: self.has_internet().await,
+            version: env!("CARGO_PKG_VERSION").into(),
+        };
+        self.record(&self.snapshot(), None, ProbeData::Heartbeat(data), vec![])
     }
 
     /// Whether anything on the internet answers a TCP handshake.
