@@ -49,10 +49,10 @@ The service runs as a dedicated hidden account (`_netprobe`), not as root. After
 
 | Probe | Metrics | How |
 | --- | --- | --- |
-| latency (every 60 s) | RTT, Jitter, Packet Loss | Unprivileged ICMP to the gateway, 1.1.1.1 and 8.8.8.8, with TCP connect timing as a fallback |
+| latency (every 5 min, 50 probes at 0.2 s) | RTT, Jitter, Packet Loss | Unprivileged ICMP to the gateway, 1.1.1.1 and 8.8.8.8, with TCP connect timing as a fallback |
 | dns (every 5 min) | DNS Resolution Time, DNS Failure Rate | Direct queries to each resolver (a cached name plus a random name under sslip.io), plus getaddrinfo |
-| connection (every 15 min) | TCP Connect, TLS Handshake, TTFB | hyper + rustls, with each phase timed |
-| throughput (every 6 h ± 30 min) | Download/Upload Speed, Download/Upload Latency, Retransmission Rate | Cloudflare speed.cloudflare.com, 4 to 16 streams |
+| connection (every 5 min) | TCP Connect, TLS Handshake, TTFB | hyper + rustls, with each phase timed |
+| throughput (every 1 h ± 5 min) | Download/Upload Speed, Download/Upload Latency, Retransmission Rate | Cloudflare speed.cloudflare.com, 4 to 16 streams |
 
 - **Upload retransmissions** come from `TCP_CONNECTION_INFO` on our own sockets.
 - **Download retransmissions** come from the `server-timing: cfL4` header, where Cloudflare reports its server-side TCP counters.
@@ -65,7 +65,7 @@ Every 5 minutes (`[heartbeat] interval_secs`) the agent stores a `heartbeat` rec
 ## Speed test rules
 
 - Postponed on metered connections (Personal Hotspot, cellular, Low Data Mode) and on battery power, with a retry every 30 minutes.
-- Capped at 300 MB per test and 1 GB per rolling 24 hours.
+- Capped at 300 MB per test and 4 GB per rolling 24 hours. On a capped 4G plan set `interval_hours = 3.0` and lower `daily_cap_mb`.
 - Postponed when other traffic is using the link (up to 3 times).
 - Never runs within 10 minutes of boot.
 - The schedule carries over across restarts, so restarting the service does not trigger a new test.

@@ -31,9 +31,9 @@ pub struct LatencyConfig {
 impl Default for LatencyConfig {
     fn default() -> Self {
         Self {
-            interval_secs: 60,
-            count: 20,
-            spacing_ms: 50,
+            interval_secs: 300,
+            count: 50,
+            spacing_ms: 200,
             timeout_ms: 2000,
             targets: vec!["gateway".into(), "1.1.1.1".into(), "8.8.8.8".into()],
         }
@@ -79,7 +79,7 @@ pub struct ConnectionConfig {
 impl Default for ConnectionConfig {
     fn default() -> Self {
         Self {
-            interval_secs: 900,
+            interval_secs: 300,
             timeout_ms: 10_000,
             targets: vec![
                 "https://www.cloudflare.com/cdn-cgi/trace".into(),
@@ -123,8 +123,8 @@ impl Default for ThroughputConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            interval_hours: 6.0,
-            jitter_minutes: 30,
+            interval_hours: 1.0,
+            jitter_minutes: 5,
             boot_delay_minutes: 10,
             server: "https://speed.cloudflare.com".into(),
             download_path: "/__down?bytes={bytes}".into(),
@@ -135,7 +135,7 @@ impl Default for ThroughputConfig {
             initial_streams: 4,
             max_streams: 16,
             per_test_cap_mb: 300,
-            daily_cap_mb: 1024,
+            daily_cap_mb: 4096,
             skip_on_metered: true,
             skip_on_battery: true,
             busy_threshold_pct: 10.0,
@@ -192,9 +192,9 @@ impl Config {
 const DEFAULT_TOML: &str = r#"# netprobe configuration. Every key is optional; these are the defaults.
 
 [latency]
-interval_secs = 60
-count = 20              # packets per target per run
-spacing_ms = 50
+interval_secs = 300
+count = 50              # packets per target per run
+spacing_ms = 200
 timeout_ms = 2000       # a reply after this is counted as "late"
 targets = ["gateway", "1.1.1.1", "8.8.8.8"]
 
@@ -208,7 +208,7 @@ extra_resolvers = []    # e.g. ["1.1.1.1", "8.8.8.8"] to compare with the ISP re
 system_lookup = true
 
 [connection]
-interval_secs = 900
+interval_secs = 300
 timeout_ms = 10000
 targets = [
   "https://www.cloudflare.com/cdn-cgi/trace",
@@ -218,8 +218,8 @@ targets = [
 
 [throughput]
 enabled = true
-interval_hours = 6.0
-jitter_minutes = 30
+interval_hours = 1.0     # D1: hourly; use 3.0 on capped 4G plans
+jitter_minutes = 5
 boot_delay_minutes = 10
 server = "https://speed.cloudflare.com"
 download_path = "/__down?bytes={bytes}"
@@ -230,7 +230,7 @@ max_duration_secs = 10  # per direction
 initial_streams = 4
 max_streams = 16
 per_test_cap_mb = 300
-daily_cap_mb = 1024     # rolling 24 hours
+daily_cap_mb = 4096     # rolling 24 hours; 24 hourly tests need about 2-4 GB
 skip_on_metered = true  # Personal Hotspot, cellular, Low Data Mode
 skip_on_battery = true
 busy_threshold_pct = 10.0
