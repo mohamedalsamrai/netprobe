@@ -27,8 +27,9 @@ pub struct Agent {
     pub identity: Identity,
     tls: Arc<ClientConfig>,
     platform_name: String,
-    /// Held by the bandwidth-heavy tests (speed test, iperf3) so they never overlap.
-    pub heavy: tokio::sync::Mutex<()>,
+    /// Held by every test while it runs, so tests never overlap and one test's traffic
+    /// never shows up in another's numbers. The heartbeat stays outside it.
+    pub test_lock: tokio::sync::Mutex<()>,
 }
 
 /// The network the measurements are taken on.
@@ -42,7 +43,7 @@ impl Agent {
     pub fn new(cfg: Config, identity: Identity) -> Self {
         let platform = netprobe_platform::current();
         let platform_name = platform.name();
-        Self { cfg, platform, identity, tls: net::tls_config(), platform_name, heavy: tokio::sync::Mutex::new(()) }
+        Self { cfg, platform, identity, tls: net::tls_config(), platform_name, test_lock: tokio::sync::Mutex::new(()) }
     }
 
     pub fn platform_name(&self) -> &str {

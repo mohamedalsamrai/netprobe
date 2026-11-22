@@ -52,10 +52,13 @@ pub async fn run(agent: Arc<Agent>, store: SharedStore, mut shutdown: watch::Rec
         set.spawn(every(Duration::from_secs(secs.max(10)), shutdown.clone(), move || {
             let (agent, store) = (agent.clone(), store.clone());
             async move {
-                let records = match name {
-                    "latency" => agent.run_latency().await,
-                    "dns" => agent.run_dns().await,
-                    _ => agent.run_connection().await,
+                let records = {
+                    let _turn = take_turn(&agent, name).await;
+                    match name {
+                        "latency" => agent.run_latency().await,
+                        "dns" => agent.run_dns().await,
+                        _ => agent.run_connection().await,
+                    }
                 };
                 save(&store, &records);
             }
@@ -70,6 +73,18 @@ pub async fn run(agent: Arc<Agent>, store: SharedStore, mut shutdown: watch::Rec
     stopped(&mut shutdown).await;
     // let in-flight probes finish their writes, but don't hold up launchd for long
     let _ = tokio::time::timeout(Duration::from_secs(5), set.join_all()).await;
+}
+
+/// Waits until no other test is running and returns the guard that keeps it that way.
+/// Tests queue in arrival order; a waiting test is delayed, never skipped.
+async fn take_turn<'a>(agent: &'a Agent, test: &str) -> tokio::sync::MutexGuard<'a, ()> {
+    let asked = Instant::now();
+    let guard = agent.test_lock.lock().await;
+    let waited = asked.elapsed();
+    if waited > Duration::from_secs(1) {
+        tracing::debug!(test, waited_s = waited.as_secs(), "waited for another test to finish");
+    }
+    guard
 }
 
 /// Waits for a default route and working DNS, backing off from 1 s to 60 s.
@@ -177,7 +192,7 @@ async fn throughput_loop(agent: Arc<Agent>, store: SharedStore, mut shutdown: wa
             _ = stopped(&mut shutdown) => return,
         }
         // held through the busy-link check too, so an iperf3 test can't look like busy traffic
-        let _heavy = agent.heavy.lock().await;
+        let _turn = take_turn(&agent, "throughput").await;
         match gate(&agent, &store, &mut postponed).await {
             Gate::Run { cap } => {
                 tracing::info!(cap_mb = cap / MB, "speed test starting");
@@ -284,7 +299,7 @@ async fn iperf_loop(agent: Arc<Agent>, store: SharedStore, mut shutdown: watch::
         let mut retries = 0;
         let rec = loop {
             let rec = {
-                let _heavy = agent.heavy.lock().await;
+                let _turn = take_turn(&agent, "iperf").await;
                 agent.run_iperf().await
             };
             if !rec.has_flag(flag::SERVER_BUSY) || retries >= c.busy_retries {

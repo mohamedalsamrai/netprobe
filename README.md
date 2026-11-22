@@ -58,6 +58,10 @@ The service runs as a dedicated hidden account (`_netprobe`), not as root. After
 - **Download retransmissions** come from the `server-timing: cfL4` header, where Cloudflare reports its server-side TCP counters.
 - **The system-wide retransmission rate** is not available: macOS 26 hides those counters from processes that are not root, and the service runs as `_netprobe`.
 
+## One test at a time
+
+Every test (ping, DNS, TCP/TLS/TTFB, speed test, iperf3) takes a shared lock while it runs, so tests never overlap and one test's traffic never shows up in another's numbers. For example, a ping is never measured over a link that a speed test is filling. A test that finds the lock taken waits its turn in arrival order. It is delayed, never skipped. The heartbeat stays outside the lock so it is always on time. With `NETPROBE_LOG=netprobe=debug` the log shows each wait.
+
 ## Heartbeat
 
 Every 5 minutes (`[heartbeat] interval_secs`) the agent stores a `heartbeat` record: agent uptime, system uptime and whether the internet answered at that moment. Heartbeats start right away, even while the network is down. A gap with no heartbeats means the agent was off. Heartbeats with `internet: false` mean the agent was running but the line was down. `netprobe status` shows the last heartbeat and how many were written in 24 hours, and `netprobe history --probe heartbeat` lists them.
@@ -66,7 +70,7 @@ Every 5 minutes (`[heartbeat] interval_secs`) the agent stores a `heartbeat` rec
 
 Every 3 hours the agent runs `iperf3 -J` against your own server: TCP, 10 s per direction, 4 parallel streams, upload and then download (`-R`). It needs the `iperf3` program on the agent (`brew install iperf3`); Homebrew's folders are searched even though launchd gives services a short PATH. If iperf3 is missing or the server cannot be reached, the failed test is stored with the error.
 
-Each agent needs its own port, because an iperf3 server runs one test at a time, and its own `slot`. Tests start `slot × slot_minutes` after each 3-hour boundary in UTC (slot 0 at 00:00, 03:00, …; slot 2 at 00:10, 03:10, …), so agents sharing a server take turns. If the server is still busy, the agent retries up to 3 times, a minute apart. The speed test and iperf3 hold a shared lock, so they never run at the same time. Both count toward the same daily data budget.
+Each agent needs its own port, because an iperf3 server runs one test at a time, and its own `slot`. Tests start `slot × slot_minutes` after each 3-hour boundary in UTC (slot 0 at 00:00, 03:00, …; slot 2 at 00:10, 03:10, …), so agents sharing a server take turns. If the server is still busy, the agent retries up to 3 times, a minute apart. Both iperf3 and the speed test count toward the same daily data budget.
 
 ```toml
 [iperf]
