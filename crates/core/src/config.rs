@@ -25,7 +25,7 @@ pub struct LatencyConfig {
     pub count: u32,
     pub spacing_ms: u64,
     pub timeout_ms: u64,
-    /// "gateway" or IPv4 addresses.
+    /// IPv4 addresses, "gateway" (the router) or "server" (the `[iperf] server`).
     pub targets: Vec<String>,
 }
 
@@ -36,7 +36,7 @@ impl Default for LatencyConfig {
             count: 50,
             spacing_ms: 200,
             timeout_ms: 2000,
-            targets: vec!["gateway".into(), "1.1.1.1".into(), "8.8.8.8".into()],
+            targets: vec!["1.1.1.1".into(), "8.8.8.8".into(), "server".into()],
         }
     }
 }
@@ -242,7 +242,8 @@ interval_secs = 300
 count = 50              # packets per target per run
 spacing_ms = 200
 timeout_ms = 2000       # a reply after this is counted as "late"
-targets = ["gateway", "1.1.1.1", "8.8.8.8"]
+# "server" is the [iperf] server below; "gateway" (the router) can be added too
+targets = ["1.1.1.1", "8.8.8.8", "server"]
 
 [dns]
 interval_secs = 300

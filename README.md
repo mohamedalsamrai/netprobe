@@ -49,7 +49,7 @@ The service runs as a dedicated hidden account (`_netprobe`), not as root. After
 
 | Probe | Metrics | How |
 | --- | --- | --- |
-| latency (every 5 min, 50 probes at 0.2 s) | RTT, Jitter, Packet Loss | Unprivileged ICMP to the gateway, 1.1.1.1 and 8.8.8.8, with TCP connect timing as a fallback |
+| latency (every 5 min, 50 probes at 0.2 s) | RTT, Jitter, Packet Loss | Unprivileged ICMP to 1.1.1.1, 8.8.8.8 and your own server (`"server"` = the `[iperf] server`, so its address stays out of the repo), with TCP connect timing as a fallback |
 | dns (every 5 min) | DNS Resolution Time, DNS Failure Rate | Direct queries to each resolver (a cached name plus a random name under sslip.io), plus getaddrinfo |
 | connection (every 5 min) | TCP Connect, TLS Handshake, TTFB | hyper + rustls, with each phase timed |
 | throughput (every 1 h ± 5 min) | Download/Upload Speed, Download/Upload Latency, Retransmission Rate | Cloudflare speed.cloudflare.com, 4 to 16 streams |

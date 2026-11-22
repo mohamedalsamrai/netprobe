@@ -84,10 +84,22 @@ impl Agent {
                 if let Some(IpAddr::V4(gw)) = snap.ctx.gateway {
                     targets.push((t.clone(), gw, 53));
                 }
+            } else if t == "server" {
+                // our own server comes from [iperf] so its address stays out of shared defaults;
+                // TCP fallback goes to SSH, which such a server keeps open
+                match self.own_server_ipv4().await {
+                    Some(ip) => targets.push((t.clone(), ip, 22)),
+                    None => {
+                        static WARNED: std::sync::Once = std::sync::Once::new();
+                        WARNED.call_once(|| {
+                            tracing::warn!("latency target \"server\" skipped: set `server` under [iperf] to an IPv4 address or a name");
+                        });
+                    }
+                }
             } else if let Ok(ip) = t.parse::<Ipv4Addr>() {
                 targets.push((t.clone(), ip, 443));
             } else {
-                tracing::warn!(target = %t, "latency targets must be \"gateway\" or an IPv4 address");
+                tracing::warn!(target = %t, "latency targets must be \"gateway\", \"server\" or an IPv4 address");
             }
         }
         let params = LatencyParams {
@@ -223,6 +235,22 @@ impl Agent {
             retrans_pct: ratio_pct(retrans as f64, sent as f64).map(round2),
         };
         self.record(&self.snapshot(), Some("system".into()), ProbeData::TcpSystem(data), vec![])
+    }
+
+    /// The IPv4 address of `[iperf] server`, resolving a name if needed.
+    async fn own_server_ipv4(&self) -> Option<Ipv4Addr> {
+        let host = self.cfg.iperf.server.trim();
+        if host.is_empty() {
+            return None;
+        }
+        if let Ok(ip) = host.parse::<Ipv4Addr>() {
+            return Some(ip);
+        }
+        let addrs = tokio::time::timeout(Duration::from_secs(3), tokio::net::lookup_host((host, 0))).await.ok()?.ok()?;
+        addrs.into_iter().find_map(|a| match a.ip() {
+            IpAddr::V4(v4) => Some(v4),
+            IpAddr::V6(_) => None,
+        })
     }
 
     /// iperf3 upload and download against our own server.
