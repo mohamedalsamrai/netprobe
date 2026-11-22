@@ -15,6 +15,7 @@ pub struct Config {
     pub throughput: ThroughputConfig,
     pub storage: StorageConfig,
     pub heartbeat: HeartbeatConfig,
+    pub iperf: IperfConfig,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -169,6 +170,51 @@ impl Default for HeartbeatConfig {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct IperfConfig {
+    pub enabled: bool,
+    /// Host or IP of our own iperf3 server; empty turns the test off.
+    pub server: String,
+    /// One port per agent: an iperf3 server runs one test at a time.
+    pub port: u16,
+    /// This agent's turn. Tests start at `slot * slot_minutes` past each interval
+    /// boundary (UTC), so agents sharing a server never test at the same moment.
+    pub slot: u32,
+    pub slot_minutes: u64,
+    pub interval_hours: f64,
+    /// Per direction.
+    pub duration_secs: u32,
+    pub streams: u32,
+    /// The iperf3 program; a bare name is also looked up in Homebrew's folders.
+    pub binary: String,
+    pub connect_timeout_ms: u64,
+    /// When the server is busy with another test, retry this many times.
+    pub busy_retries: u32,
+    pub busy_retry_secs: u64,
+    pub skip_on_metered: bool,
+}
+
+impl Default for IperfConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            server: String::new(),
+            port: 5201,
+            slot: 0,
+            slot_minutes: 5,
+            interval_hours: 3.0,
+            duration_secs: 10,
+            streams: 4,
+            binary: "iperf3".into(),
+            connect_timeout_ms: 5000,
+            busy_retries: 3,
+            busy_retry_secs: 60,
+            skip_on_metered: true,
+        }
+    }
+}
+
 impl Config {
     /// Loads `path`, or returns the defaults when the file does not exist.
     pub fn load(path: &Path) -> anyhow::Result<Self> {
@@ -242,6 +288,21 @@ hourly_retention_days = 90
 
 [heartbeat]
 interval_secs = 300     # "agent alive" record, written even while the internet is down
+
+[iperf]
+enabled = true
+server = ""             # your own iperf3 server; empty = off
+port = 5201             # one port per agent
+slot = 0                # this agent's turn: starts slot * slot_minutes after each interval (UTC)
+slot_minutes = 5
+interval_hours = 3.0
+duration_secs = 10      # per direction (upload, then download)
+streams = 4
+binary = "iperf3"
+connect_timeout_ms = 5000
+busy_retries = 3        # when the server is running another agent's test
+busy_retry_secs = 60
+skip_on_metered = true
 "#;
 
 #[cfg(test)]

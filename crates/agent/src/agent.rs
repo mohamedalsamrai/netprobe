@@ -10,7 +10,7 @@ use netprobe_core::{Config, Record};
 use netprobe_platform::{NetworkContext, Platform, TcpCounters};
 use netprobe_probes::dns::{self, DnsParams};
 use netprobe_probes::latency::{self, LatencyParams};
-use netprobe_probes::{connection, net, rt, throughput};
+use netprobe_probes::{connection, iperf, net, rt, throughput};
 use rustls::ClientConfig;
 use time::OffsetDateTime;
 use tokio::task::JoinSet;
@@ -27,6 +27,8 @@ pub struct Agent {
     pub identity: Identity,
     tls: Arc<ClientConfig>,
     platform_name: String,
+    /// Held by the bandwidth-heavy tests (speed test, iperf3) so they never overlap.
+    pub heavy: tokio::sync::Mutex<()>,
 }
 
 /// The network the measurements are taken on.
@@ -40,7 +42,7 @@ impl Agent {
     pub fn new(cfg: Config, identity: Identity) -> Self {
         let platform = netprobe_platform::current();
         let platform_name = platform.name();
-        Self { cfg, platform, identity, tls: net::tls_config(), platform_name }
+        Self { cfg, platform, identity, tls: net::tls_config(), platform_name, heavy: tokio::sync::Mutex::new(()) }
     }
 
     pub fn platform_name(&self) -> &str {
@@ -221,6 +223,22 @@ impl Agent {
             retrans_pct: ratio_pct(retrans as f64, sent as f64).map(round2),
         };
         self.record(&self.snapshot(), Some("system".into()), ProbeData::TcpSystem(data), vec![])
+    }
+
+    /// iperf3 upload and download against our own server.
+    pub async fn run_iperf(&self) -> Record {
+        let snap = self.snapshot();
+        let c = &self.cfg.iperf;
+        let params = iperf::Params {
+            binary: c.binary.clone(),
+            server: c.server.clone(),
+            port: c.port,
+            duration_s: c.duration_secs.max(1),
+            streams: c.streams.max(1),
+            connect_timeout_ms: c.connect_timeout_ms,
+        };
+        let out = iperf::run(&params).await;
+        self.record(&snap, Some(format!("{}:{}", c.server, c.port)), ProbeData::Iperf(out.data), out.flags)
     }
 
     /// "Alive" record; `started` is when the agent process began.

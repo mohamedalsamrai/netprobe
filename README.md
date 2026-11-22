@@ -62,6 +62,29 @@ The service runs as a dedicated hidden account (`_netprobe`), not as root. After
 
 Every 5 minutes (`[heartbeat] interval_secs`) the agent stores a `heartbeat` record: agent uptime, system uptime and whether the internet answered at that moment. Heartbeats start right away, even while the network is down. A gap with no heartbeats means the agent was off. Heartbeats with `internet: false` mean the agent was running but the line was down. `netprobe status` shows the last heartbeat and how many were written in 24 hours, and `netprobe history --probe heartbeat` lists them.
 
+## iperf3 (own server)
+
+Every 3 hours the agent runs `iperf3 -J` against your own server: TCP, 10 s per direction, 4 parallel streams, upload and then download (`-R`). It needs the `iperf3` program on the agent (`brew install iperf3`); Homebrew's folders are searched even though launchd gives services a short PATH. If iperf3 is missing or the server cannot be reached, the failed test is stored with the error.
+
+Each agent needs its own port, because an iperf3 server runs one test at a time, and its own `slot`. Tests start `slot × slot_minutes` after each 3-hour boundary in UTC (slot 0 at 00:00, 03:00, …; slot 2 at 00:10, 03:10, …), so agents sharing a server take turns. If the server is still busy, the agent retries up to 3 times, a minute apart. The speed test and iperf3 hold a shared lock, so they never run at the same time. Both count toward the same daily data budget.
+
+```toml
+[iperf]
+server = "your.server"   # empty = off
+port = 5203
+slot = 2
+```
+
+On the server (Debian/Ubuntu), one listener per agent port:
+
+```sh
+sudo apt install -y iperf3
+sudo systemctl enable --now iperf3@5201 iperf3@5202 iperf3@5203 iperf3@5204 iperf3@5205
+sudo ufw allow 5201:5205/tcp
+```
+
+Try it once with `netprobe once --probes iperf`. The server's own bandwidth caps the result, so it must be faster than the fastest plan you test.
+
 ## Speed test rules
 
 - Postponed on metered connections (Personal Hotspot, cellular, Low Data Mode) and on battery power, with a retry every 30 minutes.

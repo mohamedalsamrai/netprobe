@@ -4,6 +4,7 @@
 pub mod connection;
 pub mod dns;
 pub mod icmp;
+pub mod iperf;
 pub mod latency;
 pub mod net;
 pub mod rt;

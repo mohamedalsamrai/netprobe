@@ -138,11 +138,11 @@ impl Store {
         Ok(self.conn.query_row("SELECT MAX(ts_ms) FROM measurements WHERE probe = ?1", [probe], |r| r.get(0))?)
     }
 
-    /// Bytes used by speed tests since `since_ms`, for the daily data budget.
+    /// Bytes used by speed tests and iperf3 since `since_ms`, for the daily data budget.
     pub fn throughput_bytes_since(&self, since_ms: i64) -> anyhow::Result<u64> {
         let total: i64 = self.conn.query_row(
             "SELECT COALESCE(SUM(json_extract(data, '$.bytes_total')), 0)
-             FROM measurements WHERE probe = 'throughput' AND ts_ms >= ?1",
+             FROM measurements WHERE probe IN ('throughput', 'iperf') AND ts_ms >= ?1",
             [since_ms],
             |r| r.get(0),
         )?;

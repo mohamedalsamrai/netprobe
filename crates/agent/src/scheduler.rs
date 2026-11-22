@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use netprobe_core::Record;
-use netprobe_core::model::ProbeData;
+use netprobe_core::model::{ProbeData, flag};
 use netprobe_storage::{DAY_MS, RecordQuery, Store};
 use rand::Rng;
 use time::OffsetDateTime;
@@ -62,6 +62,7 @@ pub async fn run(agent: Arc<Agent>, store: SharedStore, mut shutdown: watch::Rec
         }));
     }
     set.spawn(throughput_loop(agent.clone(), store.clone(), shutdown.clone()));
+    set.spawn(iperf_loop(agent.clone(), store.clone(), shutdown.clone()));
     set.spawn(tcp_system_loop(agent.clone(), store.clone(), shutdown.clone()));
     set.spawn(maintenance_loop(agent.clone(), store.clone(), shutdown.clone()));
     set.spawn(network_watch(agent.clone(), shutdown.clone()));
@@ -175,6 +176,8 @@ async fn throughput_loop(agent: Arc<Agent>, store: SharedStore, mut shutdown: wa
             _ = tokio::time::sleep_until(next) => {}
             _ = stopped(&mut shutdown) => return,
         }
+        // held through the busy-link check too, so an iperf3 test can't look like busy traffic
+        let _heavy = agent.heavy.lock().await;
         match gate(&agent, &store, &mut postponed).await {
             Gate::Run { cap } => {
                 tracing::info!(cap_mb = cap / MB, "speed test starting");
@@ -254,6 +257,64 @@ async fn background_mbps(agent: &Agent, ifname: &str) -> Option<(f64, f64)> {
     Some((rate(rx0, rx1), rate(tx0, tx1)))
 }
 
+/// iperf3 to our own server at this agent's slot in every interval, aligned to UTC so
+/// agents sharing the server take turns.
+async fn iperf_loop(agent: Arc<Agent>, store: SharedStore, mut shutdown: watch::Receiver<bool>) {
+    let c = &agent.cfg.iperf;
+    if !c.enabled || c.server.is_empty() {
+        tracing::info!("iperf3 test is off (set [iperf] server in the config to turn it on)");
+        return;
+    }
+    let (interval, offset) = iperf_schedule(c);
+    loop {
+        let wait = next_aligned(now_ms() / 1000, interval, offset);
+        tracing::info!(server = %c.server, port = c.port, slot = c.slot, "next iperf3 test in {}", report::human_duration(wait));
+        if sleep_or_shutdown(wait, &mut shutdown).await {
+            return;
+        }
+        if c.skip_on_metered && agent.platform.is_metered() {
+            tracing::info!("iperf3 test skipped: metered connection");
+            continue;
+        }
+        let used = store.lock().unwrap().throughput_bytes_since(now_ms() - DAY_MS).unwrap_or(0);
+        if used >= agent.cfg.throughput.daily_cap_mb * MB {
+            tracing::info!(used_mb = used / MB, "iperf3 test skipped: daily data budget used up");
+            continue;
+        }
+        let mut retries = 0;
+        let rec = loop {
+            let rec = {
+                let _heavy = agent.heavy.lock().await;
+                agent.run_iperf().await
+            };
+            if !rec.has_flag(flag::SERVER_BUSY) || retries >= c.busy_retries {
+                break rec;
+            }
+            retries += 1;
+            tracing::info!(retries, "iperf3 server busy, retrying in {} s", c.busy_retry_secs);
+            if sleep_or_shutdown(Duration::from_secs(c.busy_retry_secs), &mut shutdown).await {
+                return;
+            }
+        };
+        tracing::info!("{}", report::summary_line(&rec));
+        save(&store, &[rec]);
+    }
+}
+
+/// The interval and this agent's offset into it, in seconds.
+fn iperf_schedule(c: &netprobe_core::config::IperfConfig) -> (u64, u64) {
+    let interval = ((c.interval_hours * 3600.0) as u64).max(600);
+    (interval, (u64::from(c.slot) * c.slot_minutes * 60) % interval)
+}
+
+/// Time until the next moment after `now` (unix seconds) that is `offset` past a
+/// multiple of `interval`.
+fn next_aligned(now: i64, interval: u64, offset: u64) -> Duration {
+    let (now, interval, offset) = (now.max(0) as u64, interval.max(1), offset % interval.max(1));
+    let into = (now + interval - offset) % interval;
+    Duration::from_secs(interval - into)
+}
+
 /// Writes an "agent alive" record on a fixed schedule, the first one right away.
 async fn heartbeat_loop(agent: Arc<Agent>, store: SharedStore, mut shutdown: watch::Receiver<bool>) {
     let started = std::time::Instant::now();
@@ -331,4 +392,27 @@ async fn network_watch(agent: Arc<Agent>, mut shutdown: watch::Receiver<bool>) {
 
 pub fn now_ms() -> i64 {
     (OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn slots_line_up_on_the_clock() {
+        let three_h = 3 * 3600;
+        // 00:00 UTC exactly: slot 0 waits a full interval, slot 2 waits 10 minutes
+        assert_eq!(next_aligned(0, three_h, 0), Duration::from_secs(three_h));
+        assert_eq!(next_aligned(0, three_h, 600), Duration::from_secs(600));
+        // 00:12: slot 2 (00:10) has passed, so its next turn is 03:10
+        assert_eq!(next_aligned(720, three_h, 600), Duration::from_secs(three_h - 120));
+        // 02:59:00 for slot 0: one minute to go
+        assert_eq!(next_aligned(three_h as i64 - 60, three_h, 0), Duration::from_secs(60));
+    }
+
+    #[test]
+    fn slot_offset_wraps_inside_the_interval() {
+        let c = netprobe_core::config::IperfConfig { slot: 4, slot_minutes: 5, interval_hours: 3.0, ..Default::default() };
+        assert_eq!(iperf_schedule(&c), (10_800, 1_200));
+    }
 }

@@ -109,6 +109,7 @@ enum Probe {
     Throughput,
     TcpSystem,
     Heartbeat,
+    Iperf,
 }
 
 impl Probe {
@@ -120,6 +121,7 @@ impl Probe {
             Probe::Throughput => "throughput",
             Probe::TcpSystem => "tcp_system",
             Probe::Heartbeat => "heartbeat",
+            Probe::Iperf => "iperf",
         }
     }
 }
@@ -200,7 +202,7 @@ fn cmd_once(probes: Vec<Probe>, quick: bool, cap_mb: Option<u64>, json: bool, co
         let tcp_before = agent.platform.system_tcp_counters();
         let mut records = Vec::new();
         for p in &probes {
-            if quick && *p == Probe::Throughput || *p == Probe::TcpSystem {
+            if quick && matches!(p, Probe::Throughput | Probe::Iperf) || *p == Probe::TcpSystem {
                 continue;
             }
             if !json {
@@ -219,6 +221,13 @@ fn cmd_once(probes: Vec<Probe>, quick: bool, cap_mb: Option<u64>, json: bool, co
                 }
                 Probe::TcpSystem => {}
                 Probe::Heartbeat => records.push(agent.heartbeat_record(started, Duration::ZERO).await),
+                Probe::Iperf => {
+                    if agent.cfg.iperf.server.is_empty() {
+                        eprintln!("note: no iperf3 server set; add `server` under [iperf] in the config");
+                        continue;
+                    }
+                    records.push(agent.run_iperf().await);
+                }
             }
         }
         if probes.contains(&Probe::TcpSystem) {
@@ -288,6 +297,7 @@ fn cmd_status(json: bool, data_dir: Option<PathBuf>) -> anyhow::Result<()> {
         daily_cap_mb: cfg.throughput.daily_cap_mb,
         tcp_retrans_1h_pct: sections.tcp_retrans_1h_pct,
         heartbeat: sections.heartbeat,
+        iperf: sections.iperf,
     };
     if json {
         println!("{}", serde_json::to_string_pretty(&status)?);

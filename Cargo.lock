@@ -821,6 +821,7 @@ dependencies = [
  "netprobe-platform",
  "rand 0.9.5",
  "rustls",
+ "serde_json",
  "socket2",
  "tokio",
  "tokio-rustls",

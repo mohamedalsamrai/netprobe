@@ -5,7 +5,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use netprobe_core::Record;
-use netprobe_core::model::{DirectionData, ProbeData, flag};
+use netprobe_core::model::{DirectionData, IperfData, IperfDirection, ProbeData, flag};
 use netprobe_core::stats::{mean, round2};
 use serde::Serialize;
 use time::macros::format_description;
@@ -97,6 +97,7 @@ pub fn summary_line(r: &Record) -> String {
             ),
         },
         ProbeData::TcpSystem(d) => format!("retrans {} of {} segments", pct(d.retrans_pct), d.sent_segments),
+        ProbeData::Iperf(d) => iperf_line(d),
         ProbeData::Heartbeat(d) => format!(
             "alive · agent up {} · internet {}",
             human_duration(Duration::from_secs(d.agent_uptime_s)),
@@ -197,6 +198,14 @@ pub fn print_records(records: &[Record]) {
                 println!("  retransmissions {} of {} segments in {:.0} s", pct(d.retrans_pct), d.sent_segments, d.interval_s)
             }
             ProbeData::Heartbeat(_) => println!("  {}", summary_line(r)),
+            ProbeData::Iperf(d) => {
+                println!("  {target:<26} {}{flags}", iperf_line(d));
+                for (name, dir) in [("upload", &d.upload), ("download", &d.download)] {
+                    if let Some(x) = dir {
+                        println!("  {:<26} {}", format!("  {name}"), iperf_direction(x));
+                    }
+                }
+            }
         }
     }
 }
@@ -230,6 +239,37 @@ fn print_direction(name: &str, d: &DirectionData) {
     println!("  {:<12}  {}", "", extra.join(" · "));
 }
 
+fn iperf_line(d: &IperfData) -> String {
+    let mbps = |x: &Option<IperfDirection>| x.map_or("-".into(), |x| format!("{:.2}", x.mbps));
+    let body = format!(
+        "down {} up {} Mbps · {} streams × {} s · {}",
+        mbps(&d.download),
+        mbps(&d.upload),
+        d.streams,
+        d.duration_s,
+        mb(d.bytes_total)
+    );
+    match &d.error {
+        Some(e) if d.upload.is_none() && d.download.is_none() => format!("failed: {e}"),
+        Some(e) => format!("{body} · error: {e}"),
+        None => body,
+    }
+}
+
+fn iperf_direction(x: &IperfDirection) -> String {
+    let opt = |v: Option<f64>| v.map_or("-".into(), |v| format!("{v:.0}%"));
+    format!(
+        "{:.2} Mbps received ({:.2} sent) · {} in {:.1} s · retrans {} · cpu {} local / {} server",
+        x.mbps,
+        x.sender_mbps,
+        mb(x.bytes),
+        x.duration_s,
+        x.retransmits.map_or("-".into(), |r| r.to_string()),
+        opt(x.cpu_local_pct),
+        opt(x.cpu_remote_pct)
+    )
+}
+
 // ---- netprobe status ----
 
 #[derive(Debug, Serialize)]
@@ -246,6 +286,20 @@ pub struct Status {
     pub daily_cap_mb: u64,
     pub tcp_retrans_1h_pct: Option<f64>,
     pub heartbeat: Option<HeartbeatRow>,
+    pub iperf: Option<IperfRow>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct IperfRow {
+    pub age_s: u64,
+    pub target: String,
+    pub download_mbps: Option<f64>,
+    pub upload_mbps: Option<f64>,
+    pub flags: Vec<String>,
+    pub error: Option<String>,
+    /// Successful tests in the last 24 hours, and all attempts.
+    pub ok_24h: u32,
+    pub runs_24h: u32,
 }
 
 #[derive(Debug, Serialize)]
@@ -341,6 +395,7 @@ pub struct Sections {
     pub speed: Option<SpeedRow>,
     pub tcp_retrans_1h_pct: Option<f64>,
     pub heartbeat: Option<HeartbeatRow>,
+    pub iperf: Option<IperfRow>,
 }
 
 /// Builds the status sections from the last 24 hours of records (newest first).
@@ -454,7 +509,22 @@ pub fn build_status(records: &[Record], last_speed: Option<&Record>) -> Sections
         }),
         _ => None,
     });
-    Sections { latency, dns, connection, speed, tcp_retrans_1h_pct, heartbeat }
+    let runs: Vec<&Record> = records.iter().filter(|r| r.probe() == "iperf").collect();
+    let ok = |r: &&&Record| matches!(&r.data, ProbeData::Iperf(d) if d.error.is_none());
+    let iperf = runs.first().and_then(|r| match &r.data {
+        ProbeData::Iperf(d) => Some(IperfRow {
+            age_s: age(r.ts).as_secs(),
+            target: r.target.clone().unwrap_or_default(),
+            download_mbps: d.download.map(|x| x.mbps),
+            upload_mbps: d.upload.map(|x| x.mbps),
+            flags: r.flags.clone(),
+            error: d.error.clone(),
+            ok_24h: runs.iter().filter(ok).count() as u32,
+            runs_24h: runs.len() as u32,
+        }),
+        _ => None,
+    });
+    Sections { latency, dns, connection, speed, tcp_retrans_1h_pct, heartbeat, iperf }
 }
 
 pub fn print_status(s: &Status) {
@@ -548,7 +618,23 @@ pub fn print_status(s: &Status) {
             }
         }
     }
-    println!("  data used by speed tests (24h): {:.0} / {} MB", s.speed_data_24h_mb, s.daily_cap_mb);
+    if let Some(i) = &s.iperf {
+        let v = |x: Option<f64>| x.map_or("-".into(), |x| format!("{x:.2}"));
+        println!(
+            "\nIPERF3 {} ({} ago)  down {} up {} Mbps · {} / {} ok in 24h{}",
+            i.target,
+            human_duration(Duration::from_secs(i.age_s)),
+            v(i.download_mbps),
+            v(i.upload_mbps),
+            i.ok_24h,
+            i.runs_24h,
+            if i.flags.is_empty() { String::new() } else { format!("  [{}]", i.flags.join(", ")) }
+        );
+        if let Some(e) = &i.error {
+            println!("  last error: {e}");
+        }
+    }
+    println!("  data used by speed tests and iperf3 (24h): {:.0} / {} MB", s.speed_data_24h_mb, s.daily_cap_mb);
     if let Some(t) = s.tcp_retrans_1h_pct {
         println!("\nTCP retransmissions, whole system (1h): {t:.2}%");
     }

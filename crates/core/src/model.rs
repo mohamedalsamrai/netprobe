@@ -16,6 +16,8 @@ pub mod flag {
     pub const LINK_BUSY: &str = "link_busy";
     /// The per-test data cap stopped the speed test early.
     pub const CAP_REACHED: &str = "cap_reached";
+    /// The iperf3 server was running another client's test.
+    pub const SERVER_BUSY: &str = "server_busy";
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,6 +59,7 @@ pub enum ProbeData {
     Throughput(ThroughputData),
     TcpSystem(TcpSystemData),
     Heartbeat(HeartbeatData),
+    Iperf(IperfData),
 }
 
 impl ProbeData {
@@ -68,6 +71,7 @@ impl ProbeData {
             ProbeData::Throughput(_) => "throughput",
             ProbeData::TcpSystem(_) => "tcp_system",
             ProbeData::Heartbeat(_) => "heartbeat",
+            ProbeData::Iperf(_) => "iperf",
         }
     }
 }
@@ -268,6 +272,45 @@ pub struct TcpSystemData {
     pub retrans_pct: Option<f64>,
 }
 
+// ---- iperf3 against our own server ----
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct IperfData {
+    pub server: String,
+    pub port: u16,
+    pub streams: u32,
+    pub duration_s: u32,
+    /// The iperf3 client version that ran the test.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// Agent to server.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upload: Option<IperfDirection>,
+    /// Server to agent (iperf3 reverse mode).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub download: Option<IperfDirection>,
+    /// Bytes sent in both directions, for the data budget.
+    pub bytes_total: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq)]
+pub struct IperfDirection {
+    /// What the receiving side got: the throughput that actually arrived.
+    pub mbps: f64,
+    pub sender_mbps: f64,
+    pub bytes: u64,
+    pub duration_s: f64,
+    /// TCP retransmissions of the sending side (absent when its OS does not report them).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retransmits: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_local_pct: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cpu_remote_pct: Option<f64>,
+}
+
 // ---- Heartbeat ----
 
 /// "The agent is alive": written on a fixed schedule whether or not the internet works,
@@ -337,6 +380,10 @@ impl Record {
             }
             ProbeData::TcpSystem(d) => push("retrans_pct", d.retrans_pct),
             ProbeData::Heartbeat(d) => push("internet_pct", Some(if d.internet { 100.0 } else { 0.0 })),
+            ProbeData::Iperf(d) => {
+                push("iperf_down_mbps", d.download.map(|x| x.mbps));
+                push("iperf_up_mbps", d.upload.map(|x| x.mbps));
+            }
         }
         out
     }
