@@ -26,7 +26,6 @@ const NETWORK_WATCH_INTERVAL: Duration = Duration::from_secs(30);
 const SPEEDTEST_RETRY: Duration = Duration::from_secs(30 * 60);
 const BUSY_RETRY: Duration = Duration::from_secs(10 * 60);
 const BUSY_MAX_POSTPONES: u32 = 3;
-const BUSY_SAMPLE: Duration = Duration::from_secs(3);
 /// Background traffic threshold when there is no previous speed test to compare with.
 const BUSY_FALLBACK_MBPS: f64 = 1.0;
 const MIN_TEST_BUDGET: u64 = 20 * MB;
@@ -148,7 +147,8 @@ fn save(store: &SharedStore, records: &[Record]) {
 }
 
 enum Gate {
-    Run { cap: u64 },
+    /// `busy` describes background traffic seen just before the test, if any.
+    Run { cap: u64, busy: Option<String> },
     Retry { reason: String, after: Duration },
 }
 
@@ -194,9 +194,13 @@ async fn throughput_loop(agent: Arc<Agent>, store: SharedStore, mut shutdown: wa
         // held through the busy-link check too, so an iperf3 test can't look like busy traffic
         let _turn = take_turn(&agent, "throughput").await;
         match gate(&agent, &store, &mut postponed).await {
-            Gate::Run { cap } => {
+            Gate::Run { cap, busy } => {
                 tracing::info!(cap_mb = cap / MB, "speed test starting");
-                let rec = agent.run_throughput(cap).await;
+                let mut rec = agent.run_throughput(cap).await;
+                if let Some(reason) = busy {
+                    tracing::info!(%reason, "speed test ran on a busy link (postponed {postponed} times); flagged");
+                    mark_busy(&mut rec);
+                }
                 tracing::info!("{}", report::summary_line(&rec));
                 save(&store, &[rec]);
                 postponed = 0;
@@ -242,33 +246,48 @@ async fn gate(agent: &Agent, store: &SharedStore, postponed: &mut u32) -> Gate {
         return retry("daily data budget used up", SPEEDTEST_RETRY);
     }
 
-    if *postponed < BUSY_MAX_POSTPONES
-        && let Some(ifname) = &snap.ctx.interface
-        && let Some((rx_mbps, tx_mbps)) = background_mbps(agent, ifname).await
-    {
-        let (down_ref, up_ref) = last
-            .and_then(|r| match r.data {
-                ProbeData::Throughput(t) => Some((t.download.map(|d| d.mbps), t.upload.map(|u| u.mbps))),
-                _ => None,
-            })
-            .unwrap_or((None, None));
-        let limit = |reference: Option<f64>| {
-            reference.filter(|v| *v > 0.0).map_or(BUSY_FALLBACK_MBPS, |v| v * c.busy_threshold_pct / 100.0)
-        };
-        if rx_mbps > limit(down_ref) || tx_mbps > limit(up_ref) {
-            *postponed += 1;
-            return retry(&format!("link busy ({rx_mbps:.1} Mbps in, {tx_mbps:.1} Mbps out)"), BUSY_RETRY);
-        }
+    let reference = last
+        .and_then(|r| match r.data {
+            ProbeData::Throughput(t) => Some((t.download.map(|d| d.mbps), t.upload.map(|u| u.mbps))),
+            _ => None,
+        })
+        .unwrap_or((None, None));
+    let busy = link_busy(agent, snap.ctx.interface.as_deref(), reference).await;
+    if busy.is_some() && *postponed < BUSY_MAX_POSTPONES {
+        *postponed += 1;
+        return retry(busy.as_deref().unwrap_or("link busy"), BUSY_RETRY);
     }
-    Gate::Run { cap: (c.per_test_cap_mb * MB).min(remaining) }
+    // after the last postponement the test runs anyway, flagged so analysis can leave it out
+    Gate::Run { cap: (c.per_test_cap_mb * MB).min(remaining), busy }
+}
+
+/// Watches the interface for `busy_check_secs` and describes the traffic if it is above
+/// `busy_threshold_pct` of the reference (download, upload) speeds. Only this machine's
+/// own traffic is visible, not other devices behind the same router.
+async fn link_busy(agent: &Agent, ifname: Option<&str>, reference: (Option<f64>, Option<f64>)) -> Option<String> {
+    let c = &agent.cfg.throughput;
+    let window = Duration::from_secs(c.busy_check_secs);
+    if window.is_zero() {
+        return None;
+    }
+    let (rx_mbps, tx_mbps) = background_mbps(agent, ifname?, window).await?;
+    let limit = |r: Option<f64>| r.filter(|v| *v > 0.0).map_or(BUSY_FALLBACK_MBPS, |v| v * c.busy_threshold_pct / 100.0);
+    (rx_mbps > limit(reference.0) || tx_mbps > limit(reference.1))
+        .then(|| format!("link busy ({rx_mbps:.1} Mbps in, {tx_mbps:.1} Mbps out over {} s)", window.as_secs()))
+}
+
+fn mark_busy(rec: &mut Record) {
+    if !rec.has_flag(flag::LINK_BUSY) {
+        rec.flags.push(flag::LINK_BUSY.into());
+    }
 }
 
 /// Traffic on the interface over a few seconds, in Mbps (received, sent).
-async fn background_mbps(agent: &Agent, ifname: &str) -> Option<(f64, f64)> {
+async fn background_mbps(agent: &Agent, ifname: &str, window: Duration) -> Option<(f64, f64)> {
     let (rx0, tx0) = agent.platform.interface_bytes(ifname)?;
-    tokio::time::sleep(BUSY_SAMPLE).await;
+    tokio::time::sleep(window).await;
     let (rx1, tx1) = agent.platform.interface_bytes(ifname)?;
-    let rate = |a: u64, b: u64| b.saturating_sub(a) as f64 * 8.0 / BUSY_SAMPLE.as_secs_f64() / 1e6;
+    let rate = |a: u64, b: u64| b.saturating_sub(a) as f64 * 8.0 / window.as_secs_f64() / 1e6;
     Some((rate(rx0, rx1), rate(tx0, tx1)))
 }
 
@@ -300,7 +319,14 @@ async fn iperf_loop(agent: Arc<Agent>, store: SharedStore, mut shutdown: watch::
         let rec = loop {
             let rec = {
                 let _turn = take_turn(&agent, "iperf").await;
-                agent.run_iperf().await
+                // no postponing here: moving off the slot would collide with other agents
+                let busy = link_busy(&agent, agent.snapshot().ctx.interface.as_deref(), last_iperf_speeds(&store)).await;
+                let mut rec = agent.run_iperf().await;
+                if let Some(reason) = busy {
+                    tracing::info!(%reason, "iperf3 ran on a busy link; flagged");
+                    mark_busy(&mut rec);
+                }
+                rec
             };
             if !rec.has_flag(flag::SERVER_BUSY) || retries >= c.busy_retries {
                 break rec;
@@ -314,6 +340,20 @@ async fn iperf_loop(agent: Arc<Agent>, store: SharedStore, mut shutdown: watch::
         tracing::info!("{}", report::summary_line(&rec));
         save(&store, &[rec]);
     }
+}
+
+/// (download, upload) Mbps of the last successful iperf3 test, the busy-link reference.
+fn last_iperf_speeds(store: &SharedStore) -> (Option<f64>, Option<f64>) {
+    let q = RecordQuery { probe: Some("iperf"), limit: Some(10), ..Default::default() };
+    let recs = store.lock().unwrap().query(&q).unwrap_or_default();
+    recs.into_iter()
+        .find_map(|r| match r.data {
+            ProbeData::Iperf(d) if d.download.is_some() || d.upload.is_some() => {
+                Some((d.download.map(|x| x.mbps), d.upload.map(|x| x.mbps)))
+            }
+            _ => None,
+        })
+        .unwrap_or((None, None))
 }
 
 /// The interval and this agent's offset into it, in seconds.

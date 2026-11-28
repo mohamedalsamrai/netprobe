@@ -93,7 +93,8 @@ Try it once with `netprobe once --probes iperf`. The server's own bandwidth caps
 
 - Postponed on metered connections (Personal Hotspot, cellular, Low Data Mode) and on battery power, with a retry every 30 minutes.
 - Capped at 300 MB per test and 4 GB per rolling 24 hours. On a capped 4G plan set `interval_hours = 3.0` and lower `daily_cap_mb`.
-- Postponed when other traffic is using the link (up to 3 times).
+- Before each speed test and iperf3 test the link is watched for 10 s (`busy_check_secs`). It counts as busy when other traffic is above 10% of the last result (`busy_threshold_pct`), or above 1 Mbps when there is no earlier result. A busy speed test is postponed by 10 minutes, up to 3 times; after that it runs anyway. iperf3 is never postponed, because that would move it off its slot. In both cases a test that ran on a busy link is flagged `link_busy`, so analysis can leave it out.
+- The check sees only the agent machine's own traffic, not other devices behind the same router (a phone streaming video, for example). Use a machine dedicated to measurement, on a router with no other heavy use, and list this as a limitation in the results.
 - Never runs within 10 minutes of boot.
 - The schedule carries over across restarts, so restarting the service does not trigger a new test.
 

@@ -114,7 +114,9 @@ pub struct ThroughputConfig {
     pub daily_cap_mb: u64,
     pub skip_on_metered: bool,
     pub skip_on_battery: bool,
-    /// Postpone when background traffic exceeds this % of the last measured speed.
+    /// How long the link is watched for other traffic before a speed test or iperf3 test.
+    pub busy_check_secs: u64,
+    /// Busy when background traffic exceeds this % of the last measured speed.
     pub busy_threshold_pct: f64,
     /// Target for latency under load (IPv4).
     pub latency_target: String,
@@ -139,6 +141,7 @@ impl Default for ThroughputConfig {
             daily_cap_mb: 4096,
             skip_on_metered: true,
             skip_on_battery: true,
+            busy_check_secs: 10,
             busy_threshold_pct: 10.0,
             latency_target: "1.1.1.1".into(),
         }
@@ -280,7 +283,8 @@ per_test_cap_mb = 300
 daily_cap_mb = 4096     # rolling 24 hours; 24 hourly tests need about 2-4 GB
 skip_on_metered = true  # Personal Hotspot, cellular, Low Data Mode
 skip_on_battery = true
-busy_threshold_pct = 10.0
+busy_check_secs = 10    # watch the link this long before speed tests and iperf3
+busy_threshold_pct = 10.0  # busy = other traffic above this % of the last result; flagged link_busy
 latency_target = "1.1.1.1"
 
 [storage]
